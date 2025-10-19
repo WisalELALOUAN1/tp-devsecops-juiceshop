@@ -2,25 +2,13 @@ name: "CodeQL SAST Scan"
 
 on:
   push:
-    branches: [  "master" ]
-  pull_request:
-    branches: [  "master" ]
-  schedule:
-    # Exécute une analyse tous les dimanches à 01:30 UTC
-    - cron: '30 1 * * 0'
-
-jobs:
-  analyze:
-    name: CodeQL Analysisname: "CodeQL SAST Scan"
-
-on:
-  push:
-    branches: [ "main", "master" ] # J'ai ajouté "master" pour plus de compatibilité
+    branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
   schedule:
     # Exécute une analyse tous les dimanches à 01:30 UTC
     - cron: '30 1 * * 0'
+  workflow_dispatch: # Permet de lancer le workflow manuellement
 
 jobs:
   analyze:
@@ -34,23 +22,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Spécifiez la langue ici. Pour Juice Shop, c'est tout ce qu'il faut.
         language: [ 'javascript-typescript' ] 
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Initialise les outils CodeQL
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
-        # Spécifie où les résultats SARIF seront sauvegardés
         queries: +security-and-quality
 
-    # L'étape Autobuild va automatiquement détecter et "builder"
-    # le code JavaScript/TypeScript. C'est parfait pour Juice Shop.
     - name: Autobuild
       uses: github/codeql-action/autobuild@v3
 
@@ -58,110 +41,40 @@ jobs:
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
-        # Sauvegarde les résultats dans un dossier à l'intérieur de l'espace de travail
         output: codeql-results
         
-    # Étape 1: Télécharge les résultats de l'analyse en tant qu'artefact SARIF
     - name: Upload SARIF results
       uses: actions/upload-artifact@v4
       with:
         name: sarif-results
-        path: codeql-results # Utilise le chemin local correct
+        path: codeql-results
 
-  # Nouveau job pour la conversion, pour s'assurer que l'analyse est terminée
   generate-report:
-    # Ce job dépend de la fin du job 'analyze'
     needs: analyze
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
-    # Étape 2: Télécharge l'artefact SARIF créé par le job précédent
     - name: Download SARIF results
       uses: actions/download-artifact@v4
       with:
         name: sarif-results
 
-    # Étape 3: Convertit le fichier SARIF en HTML
-    - name: Convert SARIF to HTML
-      uses: CodeSignal/sarif-to-html-action@v1.1.2 # CORRECTION: Utilisation d'une action valide
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
       with:
-        # Le nom des paramètres a aussi été mis à jour
-        sarifFile: javascript-typescript.sarif
-        outputFile: codeql-report.html
+        node-version: '18'
 
-    # Étape 4: Téléverse le rapport HTML final en tant qu'artefact
+    - name: Install SARIF to HTML tool
+      run: npm install -g @microsoft/sarif-sdk-cli
+
+    - name: Convert SARIF to HTML
+      run: sarif-to-html javascript-typescript.sarif -o codeql-report.html
+
     - name: Upload HTML report
       uses: actions/upload-artifact@v4
       with:
         name: codeql-sast-report
         path: codeql-report.html
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
 
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'javascript-typescript' ]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: +security-and-quality
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:${{matrix.language}}"
-          output: codeql-results
-
-      - name: Upload SARIF results
-        uses: actions/upload-artifact@v4
-        with:
-          name: sarif-results
-          path: codeql-results
-
-  generate-report:
-    needs: analyze
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Download SARIF results
-        uses: actions/download-artifact@v4
-        with:
-          name: sarif-results
-
-      #  Installe Node.js
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      #  Installe l’outil sarif-html (convertisseur SARIF → HTML)
-      - name: Install SARIF converter
-        run: npm install -g sarif-html
-
-      #  Convertit le rapport SARIF en HTML
-      - name: Convert SARIF to HTML
-        run: sarif-html -i codeql-results/javascript-typescript.sarif -o codeql-report.html
-
-      # Téléverse le rapport HTML final en tant qu’artefact
-      - name: Upload HTML report
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeql-sast-report
-          path: codeql-report.html
