@@ -2,9 +2,9 @@ name: "CodeQL SAST Scan"
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [  "master" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [  "master" ]
   schedule:
     # Exécute une analyse tous les dimanches à 01:30 UTC
     - cron: '30 1 * * 0'
