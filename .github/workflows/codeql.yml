@@ -2,9 +2,9 @@ name: "CodeQL SAST Scan"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main", "master" ] # J'ai ajouté "master" pour plus de compatibilité
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main", "master" ]
   schedule:
     # Exécute une analyse tous les dimanches à 01:30 UTC
     - cron: '30 1 * * 0'
@@ -33,6 +33,8 @@ jobs:
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
+        # Spécifie où les résultats SARIF seront sauvegardés
+        queries: +security-and-quality
 
     # L'étape Autobuild va automatiquement détecter et "builder"
     # le code JavaScript/TypeScript. C'est parfait pour Juice Shop.
@@ -43,4 +45,43 @@ jobs:
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
+        
+    # --- NOUVELLES ÉTAPES CI-DESSOUS ---
+
+    # Étape 1: Télécharge les résultats de l'analyse en tant qu'artefact SARIF
+    - name: Upload SARIF results
+      uses: actions/upload-artifact@v4
+      with:
+        name: sarif-results
+        path: ../results # Le chemin où CodeQL stocke les résultats
+
+    # Nouveau job pour la conversion, pour s'assurer que l'analyse est terminée
+  generate-report:
+    # Ce job dépend de la fin du job 'analyze'
+    needs: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    # Étape 2: Télécharge l'artefact SARIF créé par le job précédent
+    - name: Download SARIF results
+      uses: actions/download-artifact@v4
+      with:
+        name: sarif-results
+
+    # Étape 3: Convertit le fichier SARIF en HTML
+    - name: Convert SARIF to HTML
+      uses: microsoft/sarif-to-html-action@v1
+      with:
+        # Le fichier SARIF se trouve maintenant dans le dossier 'javascript-typescript.sarif'
+        sarif_file: javascript-typescript.sarif
+        output_file: codeql-report.html
+
+    # Étape 4: Téléverse le rapport HTML final en tant qu'artefact
+    - name: Upload HTML report
+      uses: actions/upload-artifact@v4
+      with:
+        name: codeql-sast-report
+        path: codeql-report.html
 
