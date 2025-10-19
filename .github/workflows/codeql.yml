@@ -67,10 +67,10 @@ jobs:
         node-version: '18'
 
     - name: Install SARIF to HTML tool
-      run: npm install -g @microsoft/sarif-sdk-cli
+      run: npm install -g sarif
 
     - name: Convert SARIF to HTML
-      run: sarif-to-html javascript-typescript.sarif -o codeql-report.html
+      run: sarif multiline -i javascript-typescript.sarif -o codeql-report.html -f
 
     - name: Upload HTML report
       uses: actions/upload-artifact@v4
