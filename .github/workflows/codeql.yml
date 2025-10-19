@@ -65,35 +65,48 @@ jobs:
 
     - name: Install Sarif.Multitool
       run: |
-        dotnet tool install --global Microsoft.CodeAnalysis.Sarif.Multitool --version 3.0.0
+        # CORRECTION : Utiliser le bon nom de package
+        dotnet tool install --global sarif.multitool --version 3.0.0
         export PATH="$PATH:/root/.dotnet/tools"
 
     - name: List SARIF files
       run: |
         echo "Fichiers SARIF trouvés :"
-        find . -name "*.sarif" -type f | head -10
+        find . -name "*.sarif" -type f
+        echo ""
+        echo "Structure des dossiers :"
+        ls -la
 
     - name: Convert SARIF to HTML
       run: |
-        # Trouver le premier fichier SARIF
-        SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
+        # Vérifier que sarif est installé
+        which sarif || echo "sarif non trouvé dans PATH"
+        sarif --version || echo "Impossible d'exécuter sarif"
         
-        if [ -z "$SARIF_FILE" ]; then
-          echo "Aucun fichier SARIF trouvé"
+        # Chercher le fichier SARIF exact
+        if [ -f "codeql-results/javascript-typescript.sarif" ]; then
+          SARIF_FILE="codeql-results/javascript-typescript.sarif"
+        else
+          SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
+        fi
+        
+        if [ -z "$SARIF_FILE" ] || [ ! -f "$SARIF_FILE" ]; then
+          echo " Aucun fichier SARIF trouvé"
+          find . -name "*.sarif" -type f
           exit 1
         fi
         
-        echo "Conversion du fichier: $SARIF_FILE"
+        echo " Conversion du fichier: $SARIF_FILE"
         
-        # Convertir en HTML
-        sarif convert --format html --output codeql-report.html "$SARIF_FILE"
+        # Convertir en HTML - syntaxe corrigée
+        sarif convert "$SARIF_FILE" --output codeql-report.html --format HTML
         
         # Vérifier la conversion
         if [ -f "codeql-report.html" ]; then
-          echo "Rapport HTML généré avec succès"
-          ls -la codeql-report.html
+          echo " Rapport HTML généré avec succès"
+          echo "Taille du fichier : $(wc -l < codeql-report.html) lignes"
         else
-          echo "Échec de la génération du rapport HTML"
+          echo " Échec de la génération du rapport HTML"
           exit 1
         fi
 
