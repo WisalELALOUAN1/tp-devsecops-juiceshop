@@ -72,11 +72,11 @@ jobs:
 
     # Étape 3: Convertit le fichier SARIF en HTML
     - name: Convert SARIF to HTML
-      uses: advanced-security/sarif-to-html-action@v1 # CORRECTION: Utilisation de la bonne action
+      uses: CodeSignal/sarif-to-html-action@v1.1.2 # CORRECTION: Utilisation d'une action valide
       with:
-        # Le fichier SARIF se trouve maintenant dans le dossier de l'espace de travail
-        sarif_file: javascript-typescript.sarif
-        output_file: codeql-report.html
+        # Le nom des paramètres a aussi été mis à jour
+        sarifFile: javascript-typescript.sarif
+        outputFile: codeql-report.html
 
     # Étape 4: Téléverse le rapport HTML final en tant qu'artefact
     - name: Upload HTML report
