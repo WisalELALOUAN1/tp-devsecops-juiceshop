@@ -6,9 +6,8 @@ on:
   pull_request:
     branches: [ "main", "master" ]
   schedule:
-    # Exécute une analyse tous les dimanches à 01:30 UTC
     - cron: '30 1 * * 0'
-  workflow_dispatch: # Permet de lancer le workflow manuellement
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -22,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'javascript-typescript' ] 
+        language: [ 'javascript-typescript' ]
 
     steps:
     - name: Checkout repository
@@ -41,9 +40,8 @@ jobs:
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
-        # Important: Sauvegarder les résultats pour le job suivant
         output: codeql-results
-        
+
     - name: Upload SARIF results
       uses: actions/upload-artifact@v4
       with:
@@ -51,12 +49,10 @@ jobs:
         path: codeql-results
 
   generate-report:
-    # Ce job s'exécute après 'analyze'
     needs: analyze
     name: Generate HTML Report
     runs-on: ubuntu-latest
     permissions:
-      # Permissions minimales requises
       contents: read
 
     steps:
@@ -71,15 +67,26 @@ jobs:
         dotnet-version: '6.x'
 
     - name: Install Sarif.Multitool
-      run: dotnet tool install --global Microsoft.CodeAnalysis.Sarif.Multitool
+      run: |
+        # Solution avec version spécifique
+        dotnet tool install --global Microsoft.CodeAnalysis.Sarif.Multitool --version 3.0.0
+        
+        # Alternative : vérifier si l'installation a réussi
+        dotnet tool list --global
 
     - name: Convert SARIF to HTML
-      # La commande 'sarif' est maintenant disponible
-      run: sarif convert --tool Sarif.Multitool --format html javascript-typescript.sarif -o codeql-report.html
+      run: |
+        # Trouver le fichier SARIF correct
+        find . -name "*.sarif" -type f
+        
+        # Convertir en HTML (ajuster le nom du fichier si nécessaire)
+        sarif convert --format html --output codeql-report.html javascript-typescript.sarif
+        
+        # Vérifier que le fichier HTML a été créé
+        ls -la codeql-report.html
 
     - name: Upload HTML report
       uses: actions/upload-artifact@v4
       with:
         name: codeql-sast-report
         path: codeql-report.html
-
