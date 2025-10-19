@@ -2,9 +2,9 @@ name: "CodeQL SAST Scan"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main", "master" ] # J'ai ajouté "master" pour plus de compatibilité
   pull_request:
-    branches: [  "master" ]
+    branches: [ "main", "master" ]
   schedule:
     # Exécute une analyse tous les dimanches à 01:30 UTC
     - cron: '30 1 * * 0'
@@ -48,8 +48,6 @@ jobs:
         # Sauvegarde les résultats dans un dossier à l'intérieur de l'espace de travail
         output: codeql-results
         
-    # --- ÉTAPES MODIFIÉES CI-DESSOUS ---
-
     # Étape 1: Télécharge les résultats de l'analyse en tant qu'artefact SARIF
     - name: Upload SARIF results
       uses: actions/upload-artifact@v4
@@ -74,7 +72,7 @@ jobs:
 
     # Étape 3: Convertit le fichier SARIF en HTML
     - name: Convert SARIF to HTML
-      uses: microsoft/sarif-to-html-action@v1
+      uses: advanced-security/sarif-to-html-action@v1 # CORRECTION: Utilisation de la bonne action
       with:
         # Le fichier SARIF se trouve maintenant dans le dossier de l'espace de travail
         sarif_file: javascript-typescript.sarif
