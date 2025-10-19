@@ -1,0 +1,44 @@
+name: "CodeQL SAST Scan"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Exécute une analyse tous les dimanches à 01:30 UTC
+    - cron: '30 1 * * 0'
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Spécifiez la langue ici. Pour Juice Shop, c'est tout ce qu'il faut.
+        language: [ 'javascript-typescript' ] 
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Initialise les outils CodeQL
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+
+    # L'étape Autobuild va automatiquement détecter et "builder"
+    # le code JavaScript/TypeScript. C'est parfait pour Juice Shop.
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    # Exécute l'analyse CodeQL
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
