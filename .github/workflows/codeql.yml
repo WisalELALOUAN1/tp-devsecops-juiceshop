@@ -2,6 +2,19 @@ name: "CodeQL SAST Scan"
 
 on:
   push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  schedule:
+    # Exécute une analyse tous les dimanches à 01:30 UTC
+    - cron: '30 1 * * 0'
+
+jobs:
+  analyze:
+    name: CodeQL Analysisname: "CodeQL SAST Scan"
+
+on:
+  push:
     branches: [ "main", "master" ] # J'ai ajouté "master" pour plus de compatibilité
   pull_request:
     branches: [ "main", "master" ]
@@ -84,4 +97,71 @@ jobs:
       with:
         name: codeql-sast-report
         path: codeql-report.html
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript-typescript' ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+          output: codeql-results
+
+      - name: Upload SARIF results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-results
+          path: codeql-results
+
+  generate-report:
+    needs: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download SARIF results
+        uses: actions/download-artifact@v4
+        with:
+          name: sarif-results
+
+      #  Installe Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      #  Installe l’outil sarif-html (convertisseur SARIF → HTML)
+      - name: Install SARIF converter
+        run: npm install -g sarif-html
+
+      #  Convertit le rapport SARIF en HTML
+      - name: Convert SARIF to HTML
+        run: sarif-html -i codeql-results/javascript-typescript.sarif -o codeql-report.html
+
+      # Téléverse le rapport HTML final en tant qu’artefact
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sast-report
+          path: codeql-report.html
