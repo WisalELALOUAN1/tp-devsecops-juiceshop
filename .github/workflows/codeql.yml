@@ -52,6 +52,8 @@ jobs:
     needs: analyze
     name: Generate HTML Report
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:6.0
     permissions:
       contents: read
 
@@ -61,29 +63,39 @@ jobs:
       with:
         name: sarif-results
 
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: '6.x'
-
     - name: Install Sarif.Multitool
       run: |
-        # Solution avec version spécifique
         dotnet tool install --global Microsoft.CodeAnalysis.Sarif.Multitool --version 3.0.0
-        
-        # Alternative : vérifier si l'installation a réussi
-        dotnet tool list --global
+        export PATH="$PATH:/root/.dotnet/tools"
+
+    - name: List SARIF files
+      run: |
+        echo "Fichiers SARIF trouvés :"
+        find . -name "*.sarif" -type f | head -10
 
     - name: Convert SARIF to HTML
       run: |
-        # Trouver le fichier SARIF correct
-        find . -name "*.sarif" -type f
+        # Trouver le premier fichier SARIF
+        SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
         
-        # Convertir en HTML (ajuster le nom du fichier si nécessaire)
-        sarif convert --format html --output codeql-report.html javascript-typescript.sarif
+        if [ -z "$SARIF_FILE" ]; then
+          echo "Aucun fichier SARIF trouvé"
+          exit 1
+        fi
         
-        # Vérifier que le fichier HTML a été créé
-        ls -la codeql-report.html
+        echo "Conversion du fichier: $SARIF_FILE"
+        
+        # Convertir en HTML
+        sarif convert --format html --output codeql-report.html "$SARIF_FILE"
+        
+        # Vérifier la conversion
+        if [ -f "codeql-report.html" ]; then
+          echo "Rapport HTML généré avec succès"
+          ls -la codeql-report.html
+        else
+          echo "Échec de la génération du rapport HTML"
+          exit 1
+        fi
 
     - name: Upload HTML report
       uses: actions/upload-artifact@v4
