@@ -37,44 +37,8 @@ jobs:
     - name: Autobuild
       uses: github/codeql-action/autobuild@v3
 
-    - name: Perform CodeQL Analysis
+    - name: Perform CodeQL Analysis and Upload Results
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
-        output: codeql-results
-        
-    - name: Upload SARIF results
-      uses: actions/upload-artifact@v4
-      with:
-        name: sarif-results
-        path: codeql-results
-
-  generate-report:
-    needs: analyze
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-    - name: Download SARIF results
-      uses: actions/download-artifact@v4
-      with:
-        name: sarif-results
-
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: '6.x'
-
-    - name: Install Sarif.Multitool
-      run: dotnet tool install --global Microsoft.CodeAnalysis.Sarif.Multitool
-
-    - name: Convert SARIF to HTML
-      run: sarif convert --tool Sarif.Multitool --format html javascript-typescript.sarif -o codeql-report.html
-
-    - name: Upload HTML report
-      uses: actions/upload-artifact@v4
-      with:
-        name: codeql-sast-report
-        path: codeql-report.html
 
