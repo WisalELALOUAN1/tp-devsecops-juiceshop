@@ -21,23 +21,19 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
+        # Supprimer le cache pour éviter l'erreur de lock file
 
     - name: Install dependencies
       run: |
         echo "Installation des dependances..."
         if [ -f "package.json" ]; then
-          # Solution pour projets sans package-lock.json
-          if [ -f "package-lock.json" ] || [ -f "yarn.lock" ] || [ -f "npm-shrinkwrap.json" ]; then
-            echo "Fichier de lock detecte - utilisation de npm ci"
-            npm ci
-          else
-            echo "Aucun fichier de lock - utilisation de npm install"
-            npm install
-          fi
+          # Toujours utiliser npm install (fonctionne avec ou sans lock file)
+          npm install
           echo "Dependances installees"
         else
           echo "package.json non trouve - arret du workflow"
+          echo "Fichiers presents dans le repertoire:"
+          ls -la
           exit 1
         fi
 
