@@ -21,19 +21,15 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        # Supprimer le cache pour éviter l'erreur de lock file
 
-    - name: Install dependencies
+    - name: Install dependencies (sans build)
       run: |
-        echo "Installation des dependances..."
+        echo "Installation des dependances sans build..."
         if [ -f "package.json" ]; then
-          # Toujours utiliser npm install (fonctionne avec ou sans lock file)
-          npm install
-          echo "Dependances installees"
+          npm install --ignore-scripts --no-audit --no-fund
+          echo "Dependances installees (sans build)"
         else
           echo "package.json non trouve - arret du workflow"
-          echo "Fichiers presents dans le repertoire:"
-          ls -la
           exit 1
         fi
 
@@ -41,20 +37,27 @@ jobs:
       run: |
         echo "Installation de Snyk..."
         npm install -g snyk
-        snyk --version
+
+    - name: Authenticate Snyk
+      run: |
+        echo "Authentification avec Snyk..."
+        # Utilise le token depuis les secrets GitHub
+        snyk auth ${{ secrets.SNYK_TOKEN }}
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     - name: Scan des vulnerabilites
       run: |
-        echo "Lancement du scan Snyk..."
-        # Commande qui fonctionne meme sans token
-        npx snyk test --json > snyk-results.json 2>/dev/null || echo "Scan termine"
+        echo "Lancement du scan Snyk authentifie..."
+        npx snyk test --dev --json-file-output=snyk-results.json
         
         if [ -f "snyk-results.json" ]; then
-          echo "Scan reussi - fichier genere"
+          echo "Scan authentifie reussi"
+          VULN_COUNT=$(cat snyk-results.json | jq -r '.uniqueCounts | if . then .critical+.high+.medium+.low else 0 end' 2>/dev/null || echo "0")
+          echo "Nombre total de vulnerabilites: $VULN_COUNT"
         else
-          # Creer un rapport vide pour tester
-          echo '{"vulnerabilities": [], "summary": "Test scan"}' > snyk-results.json
-          echo "Scan simule pour test"
+          echo "Erreur lors du scan authentifie"
+          exit 1
         fi
 
     - name: Generer rapport HTML
@@ -68,15 +71,27 @@ jobs:
         echo "# RAPPORT SCA - SNYK" > resume-sca.md
         echo "" >> resume-sca.md
         echo "**Date:** $(date)" >> resume-sca.md
-        echo "**Projet:** $(basename $(pwd))" >> resume-sca.md
+        echo "**Projet:** Juice Shop" >> resume-sca.md
+        echo "**Node.js:** $(node --version)" >> resume-sca.md
+        echo "" >> resume-sca.md
+        if [ -f "snyk-results.json" ]; then
+          CRITICAL=$(cat snyk-results.json | jq -r '.uniqueCounts.critical // 0' 2>/dev/null || echo "0")
+          HIGH=$(cat snyk-results.json | jq -r '.uniqueCounts.high // 0' 2>/dev/null || echo "0")
+          MEDIUM=$(cat snyk-results.json | jq -r '.uniqueCounts.medium // 0' 2>/dev/null || echo "0")
+          LOW=$(cat snyk-results.json | jq -r '.uniqueCounts.low // 0' 2>/dev/null || echo "0")
+          echo "## Resume des Vulnerabilites" >> resume-sca.md
+          echo "" >> resume-sca.md
+          echo "| Severite | Nombre |" >> resume-sca.md
+          echo "|----------|--------|" >> resume-sca.md
+          echo "| Critical | $CRITICAL |" >> resume-sca.md
+          echo "| High | $HIGH |" >> resume-sca.md
+          echo "| Medium | $MEDIUM |" >> resume-sca.md
+          echo "| Low | $LOW |" >> resume-sca.md
+        fi
         echo "" >> resume-sca.md
         echo "## Fichiers disponibles:" >> resume-sca.md
         echo "- `snyk-results.json` - Donnees brutes" >> resume-sca.md
         echo "- `snyk-report.html` - Rapport visuel" >> resume-sca.md
-        echo "" >> resume-sca.md
-        echo "## Prochaines etapes:" >> resume-sca.md
-        echo "1. Telechargez les artifacts ci-dessous" >> resume-sca.md
-        echo "2. Ouvrez `snyk-report.html` dans votre navigateur" >> resume-sca.md
 
     - name: Upload Rapports
       uses: actions/upload-artifact@v4
@@ -92,4 +107,3 @@ jobs:
       run: |
         echo "ANALYSE SCA TERMINEE AVEC SUCCES !"
         echo "Rapports disponibles dans les ARTIFACTS"
-        echo "Nom: 'rapports-sca-snyk'"
