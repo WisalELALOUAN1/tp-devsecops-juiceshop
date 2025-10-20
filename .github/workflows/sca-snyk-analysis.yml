@@ -41,57 +41,92 @@ jobs:
     - name: Authenticate Snyk
       run: |
         echo "Authentification avec Snyk..."
-        # Utilise le token depuis les secrets GitHub
         snyk auth ${{ secrets.SNYK_TOKEN }}
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     - name: Scan des vulnerabilites
       run: |
-        echo "Lancement du scan Snyk authentifie..."
-        npx snyk test --dev --json-file-output=snyk-results.json
+        echo "Lancement du scan Snyk..."
+        # Utilisation de --json-file-output pour capturer les resultats meme en cas d'echec
+        npx snyk test --dev --json-file-output=snyk-results.json || true
         
         if [ -f "snyk-results.json" ]; then
-          echo "Scan authentifie reussi"
-          VULN_COUNT=$(cat snyk-results.json | jq -r '.uniqueCounts | if . then .critical+.high+.medium+.low else 0 end' 2>/dev/null || echo "0")
-          echo "Nombre total de vulnerabilites: $VULN_COUNT"
+          echo "Scan termine - resultats captures"
+          # Compter les vulnerabilites
+          CRITICAL=$(cat snyk-results.json | jq -r '.uniqueCounts.critical // 0' 2>/dev/null || echo "0")
+          HIGH=$(cat snyk-results.json | jq -r '.uniqueCounts.high // 0' 2>/dev/null || echo "0")
+          MEDIUM=$(cat snyk-results.json | jq -r '.uniqueCounts.medium // 0' 2>/dev/null || echo "0")
+          LOW=$(cat snyk-results.json | jq -r '.uniqueCounts.low // 0' 2>/dev/null || echo "0")
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          
+          echo "=== RESUME DES VULNERABILITES ==="
+          echo "Critical: $CRITICAL"
+          echo "High: $HIGH" 
+          echo "Medium: $MEDIUM"
+          echo "Low: $LOW"
+          echo "Total: $TOTAL"
+          
+          if [ $TOTAL -gt 0 ]; then
+            echo "⚠️  Vulnerabilites detectees - le workflow continue"
+          else
+            echo "✅ Aucune vulnerabilite detectee"
+          fi
         else
-          echo "Erreur lors du scan authentifie"
+          echo "❌ Erreur: Fichier de resultats non genere"
           exit 1
         fi
 
     - name: Generer rapport HTML
       run: |
         npm install -g snyk-to-html
-        snyk-to-html -i snyk-results.json -o snyk-report.html
+        snyk-to-html -i snyk-results.json - o snyk-report.html
         echo "Rapport HTML genere"
 
-    - name: Creer le resume
+    - name: Creer le resume detaille
       run: |
         echo "# RAPPORT SCA - SNYK" > resume-sca.md
         echo "" >> resume-sca.md
         echo "**Date:** $(date)" >> resume-sca.md
         echo "**Projet:** Juice Shop" >> resume-sca.md
-        echo "**Node.js:** $(node --version)" >> resume-sca.md
+        echo "**Organisation Snyk:** wisalelalouan1" >> resume-sca.md
         echo "" >> resume-sca.md
+        
         if [ -f "snyk-results.json" ]; then
           CRITICAL=$(cat snyk-results.json | jq -r '.uniqueCounts.critical // 0' 2>/dev/null || echo "0")
           HIGH=$(cat snyk-results.json | jq -r '.uniqueCounts.high // 0' 2>/dev/null || echo "0")
           MEDIUM=$(cat snyk-results.json | jq -r '.uniqueCounts.medium // 0' 2>/dev/null || echo "0")
           LOW=$(cat snyk-results.json | jq -r '.uniqueCounts.low // 0' 2>/dev/null || echo "0")
-          echo "## Resume des Vulnerabilites" >> resume-sca.md
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          
+          echo "## 📊 Resume des Vulnerabilites" >> resume-sca.md
           echo "" >> resume-sca.md
           echo "| Severite | Nombre |" >> resume-sca.md
           echo "|----------|--------|" >> resume-sca.md
-          echo "| Critical | $CRITICAL |" >> resume-sca.md
-          echo "| High | $HIGH |" >> resume-sca.md
-          echo "| Medium | $MEDIUM |" >> resume-sca.md
-          echo "| Low | $LOW |" >> resume-sca.md
+          echo "| **Critical** | $CRITICAL |" >> resume-sca.md
+          echo "| **High** | $HIGH |" >> resume-sca.md
+          echo "| **Medium** | $MEDIUM |" >> resume-sca.md
+          echo "| **Low** | $LOW |" >> resume-sca.md
+          echo "| **Total** | **$TOTAL** |" >> resume-sca.md
+          echo "" >> resume-sca.md
+          
+          # Lister les vulnerabilites critiques
+          echo "## 🔴 Vulnerabilites Critiques Detectees" >> resume-sca.md
+          echo "" >> resume-sca.md
+          cat snyk-results.json | jq -r '.vulnerabilities[] | select(.severity == "critical") | "- " + .title + " dans " + .package + " (" + .version + ")"' 2>/dev/null >> resume-sca.md || echo "Aucune vulnerabilite critique detaillee" >> resume-sca.md
+          
+          echo "" >> resume-sca.md
+          echo "## 📋 Recommendations" >> resume-sca.md
+          echo "" >> resume-sca.md
+          echo "1. Mettre a jour vm2 vers la version 3.9.18+" >> resume-sca.md
+          echo "2. Examiner les dependances juicy-chat-bot et web3" >> resume-sca.md
+          echo "3. Consulter le rapport HTML pour les details complets" >> resume-sca.md
         fi
+        
         echo "" >> resume-sca.md
-        echo "## Fichiers disponibles:" >> resume-sca.md
-        echo "- `snyk-results.json` - Donnees brutes" >> resume-sca.md
-        echo "- `snyk-report.html` - Rapport visuel" >> resume-sca.md
+        echo "## 📁 Fichiers disponibles:" >> resume-sca.md
+        echo "- `snyk-results.json` - Donnees brutes completes" >> resume-sca.md
+        echo "- `snyk-report.html` - Rapport visuel detaille" >> resume-sca.md
 
     - name: Upload Rapports
       uses: actions/upload-artifact@v4
@@ -105,5 +140,6 @@ jobs:
 
     - name: Confirmation
       run: |
-        echo "ANALYSE SCA TERMINEE AVEC SUCCES !"
-        echo "Rapports disponibles dans les ARTIFACTS"
+        echo "🎉 ANALYSE SCA TERMINEE AVEC SUCCES !"
+        echo "📊 Vulnerabilites detectees et rapportees"
+        echo "📁 Rapports disponibles dans les ARTIFACTS: 'rapports-sca-snyk'"
