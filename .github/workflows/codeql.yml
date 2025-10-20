@@ -52,8 +52,6 @@ jobs:
     needs: analyze
     name: Generate HTML Report
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/dotnet/sdk:6.0
     permissions:
       contents: read
 
@@ -63,64 +61,89 @@ jobs:
       with:
         name: sarif-results
 
-    - name: Install Sarif.Multitool
+    - name: Install sarif-converter
       run: |
-        # CORRECTION : Utiliser le bon nom de package
-        dotnet tool install --global sarif.multitool --version 3.0.0
-        export PATH="$PATH:/root/.dotnet/tools"
+        echo "📥 Installation de sarif-converter..."
+        wget -O sarif-converter https://gitlab.com/ignis-build/sarif-converter/-/releases/permalink/latest/downloads/bin/sarif-converter-linux
+        chmod +x sarif-converter
+        
+        # Vérifier que l'outil fonctionne
+        echo "🔍 Vérification de la version :"
+        ./sarif-converter --version || echo "⚠️ Impossible d'afficher la version, mais continuation..."
 
-    - name: List SARIF files
+    - name: Debug - Explorer la structure
       run: |
-        echo "Fichiers SARIF trouvés :"
-        find . -name "*.sarif" -type f
-        echo ""
-        echo "Structure des dossiers :"
+        echo "🔍 Exploration des fichiers..."
+        echo "=== Arborescence complète ==="
+        find . -name "*.sarif" -type f | while read file; do
+          echo "📄 Fichier SARIF: $file"
+          echo "   Taille: $(wc -l < "$file") lignes"
+        done
+        
+        echo "=== Contenu du dossier courant ==="
         ls -la
+        
+        echo "=== Contenu de codeql-results ==="
+        ls -la codeql-results/ 2>/dev/null || echo "Dossier codeql-results non trouvé"
 
-    - name: Convert SARIF to HTML
+    - name: Convert all SARIF files to HTML
       run: |
-        # Vérifier que sarif est installé
-        echo "Vérification de l'installation sarif..."
-        which sarif && echo "✅ sarif trouvé dans PATH" || echo "❌ sarif non trouvé"
+        # Créer un répertoire pour les rapports
+        mkdir -p html-reports
         
-        # Chercher le fichier SARIF exact
-        if [ -f "codeql-results/javascript-typescript.sarif" ]; then
-          SARIF_FILE="codeql-results/javascript-typescript.sarif"
-          echo "✅ Fichier SARIF trouvé: $SARIF_FILE"
-        elif [ -f "javascript-typescript.sarif" ]; then
-          SARIF_FILE="javascript-typescript.sarif"
-          echo " Fichier SARIF trouvé: $SARIF_FILE"
-        else
-          SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
-          if [ -n "$SARIF_FILE" ]; then
-            echo " Fichier SARIF trouvé: $SARIF_FILE"
-          else
-            echo " Aucun fichier SARIF trouvé"
-            find . -name "*.sarif" -type f
-            exit 1
-          fi
+        # Convertir tous les fichiers SARIF trouvés
+        SARIF_FILES=$(find . -name "*.sarif" -type f)
+        
+        if [ -z "$SARIF_FILES" ]; then
+          echo "❌ Aucun fichier SARIF trouvé"
+          exit 1
         fi
         
-        echo "🔧 Conversion du fichier: $SARIF_FILE"
+        echo "🎯 Fichiers SARIF à convertir :"
+        echo "$SARIF_FILES"
         
-        # Convertir en HTML - syntaxe corrigée
-        sarif convert "$SARIF_FILE" --output codeql-report.html --format HTML
+        COUNTER=1
+        for sarif_file in $SARIF_FILES; do
+          echo "🔄 Conversion de: $sarif_file"
+          filename=$(basename "$sarif_file" .sarif)
+          output_file="html-reports/report-${COUNTER}-${filename}.html"
+          
+          ./sarif-converter --type html "$sarif_file" "$output_file"
+          
+          if [ -f "$output_file" ]; then
+            echo "✅ Converti: $output_file"
+            COUNTER=$((COUNTER + 1))
+          else
+            echo "❌ Échec conversion: $sarif_file"
+          fi
+        done
         
-        # Vérifier la conversion
-        if [ -f "codeql-report.html" ]; then
-          echo " Rapport HTML généré avec succès"
-          echo " Taille du fichier : $(wc -l < codeql-report.html) lignes"
-          echo " Fichier créé : codeql-report.html"
-        else
-          echo " Échec de la génération du rapport HTML"
-          echo "Tentative avec une autre syntaxe..."
-          # Alternative
-          sarif convert --input "$SARIF_FILE" --output codeql-report.html --format html
+        # Créer un rapport principal
+        MAIN_REPORT=$(find html-reports -name "*.html" -type f | head -1)
+        if [ -n "$MAIN_REPORT" ]; then
+          cp "$MAIN_REPORT" codeql-report.html
+          echo "📊 Rapport principal créé: codeql-report.html"
         fi
 
-    - name: Upload HTML report
+    - name: Upload HTML reports
       uses: actions/upload-artifact@v4
       with:
-        name: codeql-sast-report
-        path: codeql-report.html
+        name: codeql-sast-reports
+        path: |
+          codeql-report.html
+          html-reports/
         retention-days: 30
+
+    - name: Display report summary
+      run: |
+        echo "📈 RÉSUMÉ DES RAPPORTS GÉNÉRÉS"
+        echo "================================"
+        if [ -f "codeql-report.html" ]; then
+          echo "✅ Rapport principal: codeql-report.html"
+          echo "   Taille: $(du -h codeql-report.html | cut -f1)"
+        fi
+        
+        if [ -d "html-reports" ]; then
+          echo "📁 Rapports détaillés:"
+          find html-reports -name "*.html" -type f -exec echo "   - {} ($(du -h {} | cut -f1))" \;
+        fi
