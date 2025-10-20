@@ -61,89 +61,157 @@ jobs:
       with:
         name: sarif-results
 
-    - name: Install sarif-converter
-      run: |
-        echo "📥 Installation de sarif-converter..."
-        wget -O sarif-converter https://gitlab.com/ignis-build/sarif-converter/-/releases/permalink/latest/downloads/bin/sarif-converter-linux
-        chmod +x sarif-converter
-        
-        # Vérifier que l'outil fonctionne
-        echo "🔍 Vérification de la version :"
-        ./sarif-converter --version || echo "⚠️ Impossible d'afficher la version, mais continuation..."
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
 
-    - name: Debug - Explorer la structure
+    - name: Install dependencies
       run: |
-        echo "🔍 Exploration des fichiers..."
-        echo "=== Arborescence complète ==="
-        find . -name "*.sarif" -type f | while read file; do
-          echo "📄 Fichier SARIF: $file"
-          echo "   Taille: $(wc -l < "$file") lignes"
-        done
-        
-        echo "=== Contenu du dossier courant ==="
-        ls -la
-        
-        echo "=== Contenu de codeql-results ==="
-        ls -la codeql-results/ 2>/dev/null || echo "Dossier codeql-results non trouvé"
+        pip install jinja2
 
-    - name: Convert all SARIF files to HTML
+    - name: Create SARIF to HTML converter
       run: |
-        # Créer un répertoire pour les rapports
-        mkdir -p html-reports
+        cat > sarif_to_html.py << 'EOF'
+        import json
+        import os
+        from jinja2 import Template
         
-        # Convertir tous les fichiers SARIF trouvés
-        SARIF_FILES=$(find . -name "*.sarif" -type f)
+        # Template HTML simple
+        html_template = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>CodeQL Security Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { background: #f5f5f5; padding: 20px; border-radius: 5px; }
+                .issue { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px; }
+                .critical { border-left: 5px solid #d73a49; }
+                .high { border-left: 5px solid #f66a0a; }
+                .medium { border-left: 5px solid #ffd33d; }
+                .low { border-left: 5px solid #28a745; }
+                .rule-id { font-weight: bold; color: #0366d6; }
+                .message { margin: 10px 0; }
+                .location { background: #f6f8fa; padding: 5px; border-radius: 3px; font-family: monospace; }
+                .summary { background: #e1e4e8; padding: 10px; border-radius: 5px; margin: 10px 0; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🔒 CodeQL Security Report</h1>
+                <p>Generated from SARIF file: {{ filename }}</p>
+            </div>
+            
+            <div class="summary">
+                <h3>📊 Summary</h3>
+                <p>Total Issues: {{ total_issues }}</p>
+                <p>Critical: {{ severity_counts.critical or 0 }}</p>
+                <p>High: {{ severity_counts.high or 0 }}</p>
+                <p>Medium: {{ severity_counts.medium or 0 }}</p>
+                <p>Low: {{ severity_counts.low or 0 }}</p>
+            </div>
+            
+            {% for run in runs %}
+            <div class="run">
+                <h2>Tool: {{ run.tool.name }} {{ run.tool.version or '' }}</h2>
+                
+                {% for result in run.results %}
+                <div class="issue {{ result.level or 'warning' }}">
+                    <div class="rule-id">{{ result.ruleId }}</div>
+                    <div class="message">{{ result.message.text }}</div>
+                    
+                    {% if result.locations %}
+                    <div class="locations">
+                        <strong>Locations:</strong>
+                        {% for location in result.locations %}
+                        <div class="location">
+                            {{ location.physicalLocation.artifactLocation.uri }}:{{ location.physicalLocation.region.startLine }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="level"><strong>Level:</strong> {{ result.level or 'warning' }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </body>
+        </html>
+        """
         
-        if [ -z "$SARIF_FILES" ]; then
+        def convert_sarif_to_html(sarif_file, html_file):
+            with open(sarif_file, 'r') as f:
+                sarif_data = json.load(f)
+            
+            # Compter les sévérités
+            severity_counts = {
+                'critical': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'warning': 0,
+                'note': 0
+            }
+            
+            total_issues = 0
+            
+            for run in sarif_data.get('runs', []):
+                for result in run.get('results', []):
+                    total_issues += 1
+                    level = result.get('level', 'warning').lower()
+                    if level in severity_counts:
+                        severity_counts[level] += 1
+            
+            template = Template(html_template)
+            html_content = template.render(
+                filename=os.path.basename(sarif_file),
+                runs=sarif_data.get('runs', []),
+                total_issues=total_issues,
+                severity_counts=severity_counts
+            )
+            
+            with open(html_file, 'w') as f:
+                f.write(html_content)
+            
+            print(f"✅ Converted {sarif_file} to {html_file}")
+            print(f"📊 Total issues: {total_issues}")
+        
+        if __name__ == "__main__":
+            import sys
+            if len(sys.argv) != 3:
+                print("Usage: python sarif_to_html.py input.sarif output.html")
+                sys.exit(1)
+            
+            convert_sarif_to_html(sys.argv[1], sys.argv[2])
+        EOF
+
+    - name: Convert SARIF to HTML
+      run: |
+        # Trouver le fichier SARIF
+        SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
+        
+        if [ -z "$SARIF_FILE" ]; then
           echo "❌ Aucun fichier SARIF trouvé"
           exit 1
         fi
         
-        echo "🎯 Fichiers SARIF à convertir :"
-        echo "$SARIF_FILES"
+        echo "✅ Conversion de: $SARIF_FILE"
+        python sarif_to_html.py "$SARIF_FILE" codeql-report.html
         
-        COUNTER=1
-        for sarif_file in $SARIF_FILES; do
-          echo "🔄 Conversion de: $sarif_file"
-          filename=$(basename "$sarif_file" .sarif)
-          output_file="html-reports/report-${COUNTER}-${filename}.html"
-          
-          ./sarif-converter --type html "$sarif_file" "$output_file"
-          
-          if [ -f "$output_file" ]; then
-            echo "✅ Converti: $output_file"
-            COUNTER=$((COUNTER + 1))
-          else
-            echo "❌ Échec conversion: $sarif_file"
-          fi
-        done
-        
-        # Créer un rapport principal
-        MAIN_REPORT=$(find html-reports -name "*.html" -type f | head -1)
-        if [ -n "$MAIN_REPORT" ]; then
-          cp "$MAIN_REPORT" codeql-report.html
-          echo "📊 Rapport principal créé: codeql-report.html"
+        if [ -f "codeql-report.html" ]; then
+          echo "✅ Rapport HTML généré avec succès"
+          echo "📊 Taille: $(wc -l < codeql-report.html) lignes"
+        else
+          echo "❌ Échec de la génération"
+          exit 1
         fi
 
-    - name: Upload HTML reports
+    - name: Upload HTML report
       uses: actions/upload-artifact@v4
       with:
-        name: codeql-sast-reports
-        path: |
-          codeql-report.html
-          html-reports/
-        retention-days: 30
-
-    - name: Display report summary
-      run: |
-        echo "📈 RÉSUMÉ DES RAPPORTS GÉNÉRÉS"
-        echo "================================"
-        if [ -f "codeql-report.html" ]; then
-          echo "✅ Rapport principal: codeql-report.html"
-          echo "   Taille: $(du -h codeql-report.html | cut -f1)"
-        fi
-        
-        if [ -d "html-reports" ]; then
-          echo "📁 Rapports détaillés:"
-          find html-reports -name "*.html" -type f -exec echo "   - {} ($(du -h {} | cut -f1))" \;
-        fi
+        name: codeql-sast-report
+        path: codeql-report.html
