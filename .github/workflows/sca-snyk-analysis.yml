@@ -10,37 +10,37 @@ on:
 
 jobs:
   sca-snyk:
-    name: 🔍 SCA - Analyse des Dépendances
+    name:  SCA - Analyse des Dépendances
     runs-on: ubuntu-latest
 
     steps:
-    - name: 📥 Checkout code
+    - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: 🟢 Setup Node.js
+    - name:  Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
 
-    - name: 📦 Install dependencies
+    - name:  Install dependencies
       run: |
         echo "Installation des dépendances..."
         if [ -f "package.json" ]; then
           npm ci
-          echo "✅ Dépendances installées"
+          echo " Dépendances installées"
         else
-          echo "❌ package.json non trouvé - arrêt du workflow"
+          echo " package.json non trouvé - arrêt du workflow"
           exit 1
         fi
 
-    - name: 🔐 Setup Snyk
+    - name:  Setup Snyk
       run: |
         echo "Installation de Snyk..."
         npm install -g snyk
         snyk --version
 
-    - name: 🛡️ Scan des vulnérabilités
+    - name:  Scan des vulnérabilités
       run: |
         echo "Lancement du scan Snyk..."
         # Commande qui fonctionne même sans token
@@ -54,13 +54,13 @@ jobs:
           echo "Scan simulé pour test"
         fi
 
-    - name: 📊 Générer rapport HTML
+    - name: Générer rapport HTML
       run: |
         npm install -g snyk-to-html
         snyk-to-html -i snyk-results.json -o snyk-report.html
         echo " Rapport HTML généré"
 
-    - name: 📋 Créer le résumé
+    - name:  Créer le résumé
       run: |
         echo "#  RAPPORT SCA - SNYK" > resume-sca.md
         echo "" >> resume-sca.md
