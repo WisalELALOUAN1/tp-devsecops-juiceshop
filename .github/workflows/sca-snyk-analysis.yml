@@ -1,0 +1,94 @@
+name: "SCA - Software Composition Analysis with Snyk"
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  sca-snyk-analysis:
+    name: SCA Analysis with Snyk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        echo "📦 Installation des dépendances..."
+        npm ci
+        echo "✅ Dépendances installées"
+
+    - name: Setup Snyk
+      uses: snyk/actions/setup@master
+
+    - name: Authenticate Snyk
+      run: |
+        echo " Authentification Snyk..."
+        snyk auth ${{ secrets.SNYK_TOKEN }}
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    - name: Run Snyk test for vulnerabilities
+      run: |
+        echo "🔍 Analyse des vulnérabilités avec Snyk..."
+        snyk test --all-projects --json-file-output=snyk-vulnerabilities.json || true
+        
+        if [ -f "snyk-vulnerabilities.json" ]; then
+          echo " Rapport de vulnérabilités généré"
+        else
+          echo " Aucun rapport de vulnérabilités généré"
+        fi
+
+    - name: Generate Snyk HTML report
+      run: |
+        echo " Génération du rapport HTML..."
+        npm install -g snyk-to-html
+        
+        if [ -f "snyk-vulnerabilities.json" ]; then
+          snyk-to-html -i snyk-vulnerabilities.json -o snyk-security-report.html
+          echo " Rapport HTML généré"
+        else
+          echo " Impossible de générer le rapport HTML"
+        fi
+
+    - name: Create summary report
+      run: |
+        echo "## 📋 Résumé de l'Analyse SCA Snyk" > sca-summary.md
+        echo "" >> sca-summary.md
+        echo "**Date:** $(date)" >> sca-summary.md
+        echo "**Workflow:** SCA - Software Composition Analysis" >> sca-summary.md
+        echo "" >> sca-summary.md
+        echo "### 📁 Fichiers disponibles:" >> sca-summary.md
+        echo "- `snyk-vulnerabilities.json` - Rapport complet JSON" >> sca-summary.md
+        echo "- `snyk-security-report.html` - Rapport HTML lisible" >> sca-summary.md
+        echo "- `sca-summary.md` - Ce résumé" >> sca-summary.md
+
+    - name: Upload Snyk reports as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: sca-snyk-reports
+        path: |
+          snyk-vulnerabilities.json
+          snyk-security-report.html
+          sca-summary.md
+        retention-days: 30
+
+    - name: Final summary
+      run: |
+        echo "ANALYSE SCA TERMINÉE"
+        echo "Résultats disponibles dans les artifacts: 'sca-snyk-reports'"
