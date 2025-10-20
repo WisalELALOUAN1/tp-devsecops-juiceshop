@@ -80,23 +80,28 @@ jobs:
     - name: Convert SARIF to HTML
       run: |
         # Vérifier que sarif est installé
-        which sarif || echo "sarif non trouvé dans PATH"
-        sarif --version || echo "Impossible d'exécuter sarif"
+        echo "Vérification de l'installation sarif..."
+        which sarif && echo "✅ sarif trouvé dans PATH" || echo "❌ sarif non trouvé"
         
         # Chercher le fichier SARIF exact
         if [ -f "codeql-results/javascript-typescript.sarif" ]; then
           SARIF_FILE="codeql-results/javascript-typescript.sarif"
+          echo "✅ Fichier SARIF trouvé: $SARIF_FILE"
+        elif [ -f "javascript-typescript.sarif" ]; then
+          SARIF_FILE="javascript-typescript.sarif"
+          echo " Fichier SARIF trouvé: $SARIF_FILE"
         else
           SARIF_FILE=$(find . -name "*.sarif" -type f | head -1)
+          if [ -n "$SARIF_FILE" ]; then
+            echo " Fichier SARIF trouvé: $SARIF_FILE"
+          else
+            echo " Aucun fichier SARIF trouvé"
+            find . -name "*.sarif" -type f
+            exit 1
+          fi
         fi
         
-        if [ -z "$SARIF_FILE" ] || [ ! -f "$SARIF_FILE" ]; then
-          echo " Aucun fichier SARIF trouvé"
-          find . -name "*.sarif" -type f
-          exit 1
-        fi
-        
-        echo " Conversion du fichier: $SARIF_FILE"
+        echo "🔧 Conversion du fichier: $SARIF_FILE"
         
         # Convertir en HTML - syntaxe corrigée
         sarif convert "$SARIF_FILE" --output codeql-report.html --format HTML
@@ -104,10 +109,13 @@ jobs:
         # Vérifier la conversion
         if [ -f "codeql-report.html" ]; then
           echo " Rapport HTML généré avec succès"
-          echo "Taille du fichier : $(wc -l < codeql-report.html) lignes"
+          echo " Taille du fichier : $(wc -l < codeql-report.html) lignes"
+          echo " Fichier créé : codeql-report.html"
         else
           echo " Échec de la génération du rapport HTML"
-          exit 1
+          echo "Tentative avec une autre syntaxe..."
+          # Alternative
+          sarif convert --input "$SARIF_FILE" --output codeql-report.html --format html
         fi
 
     - name: Upload HTML report
@@ -115,3 +123,4 @@ jobs:
       with:
         name: codeql-sast-report
         path: codeql-report.html
+        retention-days: 30
