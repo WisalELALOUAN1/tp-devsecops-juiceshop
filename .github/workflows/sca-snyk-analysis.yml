@@ -48,12 +48,10 @@ jobs:
     - name: Scan des vulnerabilites
       run: |
         echo "Lancement du scan Snyk..."
-        # Utilisation de --json-file-output pour capturer les resultats meme en cas d'echec
         npx snyk test --dev --json-file-output=snyk-results.json || true
         
         if [ -f "snyk-results.json" ]; then
           echo "Scan termine - resultats captures"
-          # Compter les vulnerabilites
           CRITICAL=$(cat snyk-results.json | jq -r '.uniqueCounts.critical // 0' 2>/dev/null || echo "0")
           HIGH=$(cat snyk-results.json | jq -r '.uniqueCounts.high // 0' 2>/dev/null || echo "0")
           MEDIUM=$(cat snyk-results.json | jq -r '.uniqueCounts.medium // 0' 2>/dev/null || echo "0")
@@ -66,24 +64,357 @@ jobs:
           echo "Medium: $MEDIUM"
           echo "Low: $LOW"
           echo "Total: $TOTAL"
-          
-          if [ $TOTAL -gt 0 ]; then
-            echo "⚠️  Vulnerabilites detectees - le workflow continue"
-          else
-            echo "✅ Aucune vulnerabilite detectee"
-          fi
         else
-          echo "❌ Erreur: Fichier de resultats non genere"
+          echo "Erreur: Fichier de resultats non genere"
           exit 1
         fi
 
-    - name: Generer rapport HTML
-      run: |
-        npm install -g snyk-to-html
-        snyk-to-html -i snyk-results.json - o snyk-report.html
-        echo "Rapport HTML genere"
+    - name: Setup Python pour generateur HTML
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
 
-    - name: Creer le resume detaille
+    - name: Install dependencies Python
+      run: |
+        pip install jinja2
+
+    - name: Create Snyk to HTML converter
+      run: |
+        cat > snyk_to_html.py << 'EOF'
+        import json
+        import os
+        from jinja2 import Template
+        
+        # Template HTML pour Snyk
+        html_template = """
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Rapport Securite Snyk - SCA</title>
+            <style>
+                body { 
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                    margin: 0; 
+                    padding: 20px; 
+                    background-color: #f5f5f5; 
+                }
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                .header { 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                }
+                .header h1 {
+                    margin: 0;
+                    font-size: 2.5em;
+                }
+                .summary { 
+                    background: #f8f9fa; 
+                    padding: 25px; 
+                    border-radius: 8px; 
+                    margin: 20px 0; 
+                    border-left: 5px solid #667eea;
+                }
+                .summary-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 15px;
+                    margin-top: 15px;
+                }
+                .summary-item {
+                    text-align: center;
+                    padding: 15px;
+                    border-radius: 8px;
+                    color: white;
+                    font-weight: bold;
+                }
+                .critical { background: #dc3545; }
+                .high { background: #fd7e14; }
+                .medium { background: #ffc107; color: #000; }
+                .low { background: #28a745; }
+                .total { background: #6c757d; }
+                .vulnerability { 
+                    border: 1px solid #e9ecef; 
+                    margin: 15px 0; 
+                    padding: 20px; 
+                    border-radius: 8px;
+                    transition: transform 0.2s;
+                }
+                .vulnerability:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                }
+                .critical-vuln { border-left: 5px solid #dc3545; }
+                .high-vuln { border-left: 5px solid #fd7e14; }
+                .medium-vuln { border-left: 5px solid #ffc107; }
+                .low-vuln { border-left: 5px solid #28a745; }
+                .package-name { 
+                    font-weight: bold; 
+                    color: #495057;
+                    font-size: 1.1em;
+                }
+                .vuln-title { 
+                    color: #dc3545; 
+                    margin: 10px 0;
+                    font-size: 1.2em;
+                }
+                .vuln-description {
+                    margin: 10px 0;
+                    line-height: 1.6;
+                }
+                .fix-info {
+                    background: #e7f3ff;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin: 10px 0;
+                    border-left: 4px solid #007bff;
+                }
+                .metadata {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 10px;
+                    margin: 15px 0;
+                    font-size: 0.9em;
+                }
+                .metadata-item {
+                    padding: 8px;
+                    background: #f8f9fa;
+                    border-radius: 4px;
+                }
+                .severity-badge {
+                    display: inline-block;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    color: white;
+                    font-size: 0.8em;
+                    font-weight: bold;
+                    margin-right: 10px;
+                }
+                .no-vulnerabilities {
+                    text-align: center;
+                    padding: 40px;
+                    color: #28a745;
+                    font-size: 1.2em;
+                }
+                .filters {
+                    margin: 20px 0;
+                    display: flex;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                }
+                .filter-btn {
+                    padding: 8px 16px;
+                    border: 2px solid #667eea;
+                    background: white;
+                    color: #667eea;
+                    border-radius: 20px;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                }
+                .filter-btn.active {
+                    background: #667eea;
+                    color: white;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔒 Rapport Securite Snyk - SCA</h1>
+                    <p>Software Composition Analysis - Analyse des Dependances</p>
+                    <p>Projet: {{ project_name }} | Date: {{ scan_date }}</p>
+                </div>
+                
+                <div class="summary">
+                    <h3>📊 Resume de l'Analyse</h3>
+                    <div class="summary-grid">
+                        <div class="summary-item critical">
+                            <div>CRITIQUE</div>
+                            <div style="font-size: 2em;">{{ severity_counts.critical }}</div>
+                        </div>
+                        <div class="summary-item high">
+                            <div>ELEVEE</div>
+                            <div style="font-size: 2em;">{{ severity_counts.high }}</div>
+                        </div>
+                        <div class="summary-item medium">
+                            <div>MOYENNE</div>
+                            <div style="font-size: 2em;">{{ severity_counts.medium }}</div>
+                        </div>
+                        <div class="summary-item low">
+                            <div>FAIBLE</div>
+                            <div style="font-size: 2em;">{{ severity_counts.low }}</div>
+                        </div>
+                        <div class="summary-item total">
+                            <div>TOTAL</div>
+                            <div style="font-size: 2em;">{{ total_vulnerabilities }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                {% if total_vulnerabilities > 0 %}
+                <div class="filters">
+                    <button class="filter-btn active" onclick="filterVulnerabilities('all')">Toutes ({{ total_vulnerabilities }})</button>
+                    <button class="filter-btn" onclick="filterVulnerabilities('critical')">Critique ({{ severity_counts.critical }})</button>
+                    <button class="filter-btn" onclick="filterVulnerabilities('high')">Elevee ({{ severity_counts.high }})</button>
+                    <button class="filter-btn" onclick="filterVulnerabilities('medium')">Moyenne ({{ severity_counts.medium }})</button>
+                    <button class="filter-btn" onclick="filterVulnerabilities('low')">Faible ({{ severity_counts.low }})</button>
+                </div>
+
+                <div id="vulnerabilities-list">
+                    {% for vuln in vulnerabilities %}
+                    <div class="vulnerability {{ vuln.severity }}-vuln" data-severity="{{ vuln.severity }}">
+                        <div class="package-name">
+                            <span class="severity-badge {{ vuln.severity }}-vuln">{{ vuln.severity|upper }}</span>
+                            {{ vuln.package }}@{{ vuln.version }}
+                        </div>
+                        <div class="vuln-title">{{ vuln.title }}</div>
+                        <div class="vuln-description">{{ vuln.description }}</div>
+                        
+                        <div class="metadata">
+                            <div class="metadata-item">
+                                <strong>Identifiant:</strong> {{ vuln.id }}
+                            </div>
+                            <div class="metadata-item">
+                                <strong>Package:</strong> {{ vuln.package }}@{{ vuln.version }}
+                            </div>
+                            <div class="metadata-item">
+                                <strong>Introduit par:</strong> {{ vuln.from|join(' → ') }}
+                            </div>
+                        </div>
+
+                        {% if vuln.fixedIn %}
+                        <div class="fix-info">
+                            <strong>✅ Correction disponible:</strong> Mettre à jour vers {{ vuln.fixedIn[0] }}
+                        </div>
+                        {% endif %}
+
+                        {% if vuln.identifiers and vuln.identifiers.CVE %}
+                        <div class="metadata">
+                            <div class="metadata-item">
+                                <strong>CVE:</strong> 
+                                {% for cve in vuln.identifiers.CVE %}
+                                <a href="https://nvd.nist.gov/vuln/detail/{{ cve }}" target="_blank">{{ cve }}</a>{% if not loop.last %}, {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="no-vulnerabilities">
+                    ✅ Aucune vulnerabilite detectee dans les dependances
+                </div>
+                {% endif %}
+            </div>
+
+            <script>
+                function filterVulnerabilities(severity) {
+                    // Mettre à jour les boutons
+                    document.querySelectorAll('.filter-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    event.target.classList.add('active');
+                    
+                    // Filtrer les vulnérabilités
+                    const vulnerabilities = document.querySelectorAll('.vulnerability');
+                    vulnerabilities.forEach(vuln => {
+                        if (severity === 'all' || vuln.dataset.severity === severity) {
+                            vuln.style.display = 'block';
+                        } else {
+                            vuln.style.display = 'none';
+                        }
+                    });
+                }
+            </script>
+        </body>
+        </html>
+        """
+        
+        def convert_snyk_to_html(snyk_file, html_file):
+            with open(snyk_file, 'r') as f:
+                snyk_data = json.load(f)
+            
+            # Compter les severites
+            severity_counts = {
+                'critical': snyk_data.get('uniqueCounts', {}).get('critical', 0),
+                'high': snyk_data.get('uniqueCounts', {}).get('high', 0),
+                'medium': snyk_data.get('uniqueCounts', {}).get('medium', 0),
+                'low': snyk_data.get('uniqueCounts', {}).get('low', 0)
+            }
+            
+            total_vulnerabilities = sum(severity_counts.values())
+            
+            # Preparer les donnees des vulnerabilites
+            vulnerabilities = []
+            for vuln in snyk_data.get('vulnerabilities', []):
+                vulnerability_data = {
+                    'id': vuln.get('id', ''),
+                    'title': vuln.get('title', ''),
+                    'severity': vuln.get('severity', '').lower(),
+                    'package': vuln.get('package', ''),
+                    'version': vuln.get('version', ''),
+                    'description': vuln.get('description', ''),
+                    'from': vuln.get('from', []),
+                    'fixedIn': vuln.get('fixedIn', []),
+                    'identifiers': vuln.get('identifiers', {})
+                }
+                vulnerabilities.append(vulnerability_data)
+            
+            # Trier par severite (critique d'abord)
+            severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+            vulnerabilities.sort(key=lambda x: severity_order.get(x['severity'], 4))
+            
+            template = Template(html_template)
+            html_content = template.render(
+                project_name=snyk_data.get('packageManager', 'Projet'),
+                scan_date=os.path.basename(snyk_file),
+                total_vulnerabilities=total_vulnerabilities,
+                severity_counts=severity_counts,
+                vulnerabilities=vulnerabilities
+            )
+            
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            print(f"Rapport HTML genere: {html_file}")
+            print(f"Total vulnerabilites: {total_vulnerabilities}")
+        
+        if __name__ == "__main__":
+            import sys
+            if len(sys.argv) != 3:
+                print("Usage: python snyk_to_html.py input.json output.html")
+                sys.exit(1)
+            
+            convert_snyk_to_html(sys.argv[1], sys.argv[2])
+        EOF
+
+    - name: Convert Snyk JSON to HTML
+      run: |
+        echo "Conversion du rapport Snyk en HTML..."
+        python snyk_to_html.py snyk-results.json snyk-report.html
+        
+        if [ -f "snyk-report.html" ]; then
+          echo "Rapport HTML genere avec succes"
+          echo "Taille: $(wc -l < snyk-report.html) lignes"
+        else
+          echo "Erreur lors de la generation du rapport HTML"
+          exit 1
+        fi
+
+    - name: Creer le resume
       run: |
         echo "# RAPPORT SCA - SNYK" > resume-sca.md
         echo "" >> resume-sca.md
@@ -99,7 +430,7 @@ jobs:
           LOW=$(cat snyk-results.json | jq -r '.uniqueCounts.low // 0' 2>/dev/null || echo "0")
           TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
           
-          echo "## 📊 Resume des Vulnerabilites" >> resume-sca.md
+          echo "## Resume des Vulnerabilites" >> resume-sca.md
           echo "" >> resume-sca.md
           echo "| Severite | Nombre |" >> resume-sca.md
           echo "|----------|--------|" >> resume-sca.md
@@ -108,23 +439,10 @@ jobs:
           echo "| **Medium** | $MEDIUM |" >> resume-sca.md
           echo "| **Low** | $LOW |" >> resume-sca.md
           echo "| **Total** | **$TOTAL** |" >> resume-sca.md
-          echo "" >> resume-sca.md
-          
-          # Lister les vulnerabilites critiques
-          echo "## 🔴 Vulnerabilites Critiques Detectees" >> resume-sca.md
-          echo "" >> resume-sca.md
-          cat snyk-results.json | jq -r '.vulnerabilities[] | select(.severity == "critical") | "- " + .title + " dans " + .package + " (" + .version + ")"' 2>/dev/null >> resume-sca.md || echo "Aucune vulnerabilite critique detaillee" >> resume-sca.md
-          
-          echo "" >> resume-sca.md
-          echo "## 📋 Recommendations" >> resume-sca.md
-          echo "" >> resume-sca.md
-          echo "1. Mettre a jour vm2 vers la version 3.9.18+" >> resume-sca.md
-          echo "2. Examiner les dependances juicy-chat-bot et web3" >> resume-sca.md
-          echo "3. Consulter le rapport HTML pour les details complets" >> resume-sca.md
         fi
         
         echo "" >> resume-sca.md
-        echo "## 📁 Fichiers disponibles:" >> resume-sca.md
+        echo "## Fichiers disponibles:" >> resume-sca.md
         echo "- `snyk-results.json` - Donnees brutes completes" >> resume-sca.md
         echo "- `snyk-report.html` - Rapport visuel detaille" >> resume-sca.md
 
@@ -140,6 +458,5 @@ jobs:
 
     - name: Confirmation
       run: |
-        echo "🎉 ANALYSE SCA TERMINEE AVEC SUCCES !"
-        echo "📊 Vulnerabilites detectees et rapportees"
-        echo "📁 Rapports disponibles dans les ARTIFACTS: 'rapports-sca-snyk'"
+        echo "ANALYSE SCA TERMINEE AVEC SUCCES !"
+        echo "Rapports disponibles dans les ARTIFACTS: 'rapports-sca-snyk'"
