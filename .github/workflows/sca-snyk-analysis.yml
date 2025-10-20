@@ -10,72 +10,79 @@ on:
 
 jobs:
   sca-snyk:
-    name:  SCA - Analyse des Dépendances
+    name: SCA - Analyse des Dépendances
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name:  Setup Node.js
+    - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
 
-    - name:  Install dependencies
+    - name: Install dependencies
       run: |
-        echo "Installation des dépendances..."
+        echo "Installation des dependances..."
         if [ -f "package.json" ]; then
-          npm ci
-          echo " Dépendances installées"
+          # Solution pour projets sans package-lock.json
+          if [ -f "package-lock.json" ] || [ -f "yarn.lock" ] || [ -f "npm-shrinkwrap.json" ]; then
+            echo "Fichier de lock detecte - utilisation de npm ci"
+            npm ci
+          else
+            echo "Aucun fichier de lock - utilisation de npm install"
+            npm install
+          fi
+          echo "Dependances installees"
         else
-          echo " package.json non trouvé - arrêt du workflow"
+          echo "package.json non trouve - arret du workflow"
           exit 1
         fi
 
-    - name:  Setup Snyk
+    - name: Setup Snyk
       run: |
         echo "Installation de Snyk..."
         npm install -g snyk
         snyk --version
 
-    - name:  Scan des vulnérabilités
+    - name: Scan des vulnerabilites
       run: |
         echo "Lancement du scan Snyk..."
-        # Commande qui fonctionne même sans token
-        npx snyk test --json > snyk-results.json 2>/dev/null || echo "Scan terminé"
+        # Commande qui fonctionne meme sans token
+        npx snyk test --json > snyk-results.json 2>/dev/null || echo "Scan termine"
         
         if [ -f "snyk-results.json" ]; then
-          echo " Scan réussi - fichier généré"
+          echo "Scan reussi - fichier genere"
         else
-          # Créer un rapport vide pour tester
+          # Creer un rapport vide pour tester
           echo '{"vulnerabilities": [], "summary": "Test scan"}' > snyk-results.json
-          echo "Scan simulé pour test"
+          echo "Scan simule pour test"
         fi
 
-    - name: Générer rapport HTML
+    - name: Generer rapport HTML
       run: |
         npm install -g snyk-to-html
         snyk-to-html -i snyk-results.json -o snyk-report.html
-        echo " Rapport HTML généré"
+        echo "Rapport HTML genere"
 
-    - name:  Créer le résumé
+    - name: Creer le resume
       run: |
-        echo "#  RAPPORT SCA - SNYK" > resume-sca.md
+        echo "# RAPPORT SCA - SNYK" > resume-sca.md
         echo "" >> resume-sca.md
         echo "**Date:** $(date)" >> resume-sca.md
         echo "**Projet:** $(basename $(pwd))" >> resume-sca.md
         echo "" >> resume-sca.md
-        echo "##  Fichiers disponibles:" >> resume-sca.md
-        echo "- `snyk-results.json` - Données brutes" >> resume-sca.md
+        echo "## Fichiers disponibles:" >> resume-sca.md
+        echo "- `snyk-results.json` - Donnees brutes" >> resume-sca.md
         echo "- `snyk-report.html` - Rapport visuel" >> resume-sca.md
         echo "" >> resume-sca.md
-        echo "##  Prochaines étapes:" >> resume-sca.md
-        echo "1. Téléchargez les artifacts ci-dessous" >> resume-sca.md
+        echo "## Prochaines etapes:" >> resume-sca.md
+        echo "1. Telechargez les artifacts ci-dessous" >> resume-sca.md
         echo "2. Ouvrez `snyk-report.html` dans votre navigateur" >> resume-sca.md
 
-    - name:  Upload Rapports
+    - name: Upload Rapports
       uses: actions/upload-artifact@v4
       with:
         name: rapports-sca-snyk
@@ -85,8 +92,8 @@ jobs:
           resume-sca.md
         retention-days: 30
 
-    - name:  Confirmation
+    - name: Confirmation
       run: |
-        echo " ANALYSE SCA TERMINÉE AVEC SUCCÈS !"
-        echo " Rapports disponibles dans les ARTIFACTS"
-        echo " Nom: 'rapports-sca-snyk'"
+        echo "ANALYSE SCA TERMINEE AVEC SUCCES !"
+        echo "Rapports disponibles dans les ARTIFACTS"
+        echo "Nom: 'rapports-sca-snyk'"
